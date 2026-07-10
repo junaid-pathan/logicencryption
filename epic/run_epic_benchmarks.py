@@ -22,7 +22,7 @@ from pathlib import Path
 import epic
 
 HERE = Path(__file__).resolve().parent
-BENCH_DIR = HERE / "benchmarks"
+BENCH_DIR = HERE.parent / "benchmarks"
 LOCKED_DIR = HERE / "locked_outputs"
 RESULTS_DIR = HERE / "results"
 RESULTS_CSV = RESULTS_DIR / "epic_results.csv"

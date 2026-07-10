@@ -20,7 +20,7 @@ import ttlock
 
 HERE = Path(__file__).resolve().parent
 TINY_DIR = HERE / "tests" / "tiny"
-EPIC_BENCH_DIR = HERE.parent / "epic" / "benchmarks"
+BENCH_DIR = HERE.parent / "benchmarks"
 
 
 # ---------------------------------------------------------------------------
@@ -380,7 +380,7 @@ def test_write_creates_locked_file_with_expected_markers(tmp_path):
 # ---------------------------------------------------------------------------
 
 def _bench_or_skip(family: str, name: str) -> Path:
-    path = EPIC_BENCH_DIR / family / name
+    path = BENCH_DIR / family / name
     if not path.exists():
         pytest.skip(f"{path} not present; download benchmark to enable this test")
     return path

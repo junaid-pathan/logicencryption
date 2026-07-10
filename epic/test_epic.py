@@ -15,7 +15,7 @@ import pytest
 import epic
 
 HERE = Path(__file__).resolve().parent
-BENCH_DIR = HERE / "benchmarks"
+BENCH_DIR = HERE.parent / "benchmarks"
 
 
 SIMPLE_BENCH = """

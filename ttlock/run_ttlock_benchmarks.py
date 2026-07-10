@@ -26,7 +26,7 @@ from pathlib import Path
 import ttlock
 
 HERE = Path(__file__).resolve().parent
-EPIC_BENCH_DIR = HERE.parent / "epic" / "benchmarks"
+BENCH_DIR = HERE.parent / "benchmarks"
 LOCKED_DIR = HERE / "locked_outputs"
 KEYS_DIR = HERE / "keys"
 RESULTS_DIR = HERE / "results"
@@ -214,7 +214,7 @@ def main():
     rows = []
 
     for family in args.families:
-        family_dir = EPIC_BENCH_DIR / family
+        family_dir = BENCH_DIR / family
         locked_out_dir = LOCKED_DIR / family
         locked_out_dir.mkdir(parents=True, exist_ok=True)
         if not family_dir.exists():
