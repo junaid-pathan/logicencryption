@@ -325,3 +325,63 @@ class AntiSAT:
         self.locked_circuit.primary_outputs[target_output_idx] = new_output
 
         return self.locked_circuit
+
+    def write_key(self, path: str):
+        with open(path, 'w') as f:
+            f.write(f"# Anti-SAT Secret Key File\n")
+            f.write(f"# block_input_size (n): {self.n}\n")
+            f.write(f"# target_output: {self.target_output}\n\n")
+            for name in sorted(self.correct_key.keys()):
+                f.write(f"{name} = {self.correct_key[name]}\n")
+
+    def print_summary(self):
+        n = self.n
+        print("\n" + "=" * 60)
+        print("  Anti-SAT Locking Summary")
+        print("=" * 60)
+        print(f"  Block input size (n)  : {n}")
+        print(f"  Total key bits (2n)   : {2 * n}")
+        print(f"  Block inputs (X)      : {', '.join(self.block_inputs)}")
+        print(f"  Target output         : {self.target_output}")
+        print(f"  SAT attack iterations : lower-bounded by 2^{n} (Theorem 1, p=1)")
+        print("=" * 60 + "\n")
+
+
+def main():
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description="Apply a baseline Anti-SAT block to a .bench circuit "
+                    "(Xie & Srivastava, CHES 2016)."
+    )
+    ap.add_argument('input', help='Input .bench file')
+    ap.add_argument('output', help='Output locked .bench file')
+    ap.add_argument('--block-size', '-n', type=int, default=8,
+                    help='Anti-SAT block input size n (total key bits = 2n). Default: 8')
+    ap.add_argument('--seed', '-s', type=int, default=None,
+                    help='Random seed for reproducibility (default: random)')
+    ap.add_argument('--target-output-idx', type=int, default=0,
+                    help='Index into primary_outputs to XOR the Anti-SAT block into')
+    ap.add_argument('--key-file', '-k', type=str, default=None,
+                    help='Path to write the secret key (default: <output>.key)')
+    args = ap.parse_args()
+
+    print(f"[Anti-SAT] Parsing: {args.input}")
+    circuit = BenchmarkParser.parse_bench(args.input)
+    print(f"  {len(circuit.primary_inputs)} inputs, {len(circuit.gates)} gates, "
+          f"{len(circuit.primary_outputs)} outputs")
+
+    locker = AntiSAT(circuit, block_input_size=args.block_size)
+    locked = locker.lock(seed=args.seed, target_output_idx=args.target_output_idx)
+    locker.print_summary()
+
+    BenchmarkParser.write_bench(locked, args.output)
+    print(f"[Anti-SAT] Locked circuit written to: {args.output}")
+
+    key_path = args.key_file or (args.output.replace('.bench', '') + '.key')
+    locker.write_key(key_path)
+    print(f"[Anti-SAT] Secret key written to: {key_path}")
+
+
+if __name__ == '__main__':
+    main()
