@@ -1,0 +1,6 @@
+INPUT(a)
+INPUT(b)
+OUTPUT(out)
+
+n1 = AND(a, b)
+out = NOT(n1)

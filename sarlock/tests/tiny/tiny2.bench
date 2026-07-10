@@ -1,0 +1,16 @@
+# slightly bigger hand-written circuit for multi-key-bit tests
+INPUT(a)
+INPUT(b)
+INPUT(c)
+INPUT(d)
+OUTPUT(out1)
+OUTPUT(out2)
+
+n1 = AND(a, b)
+n2 = OR(c, d)
+n3 = NAND(n1, n2)
+n4 = XOR(a, d)
+n5 = AND(n3, n4)
+n6 = OR(n1, n2)
+out1 = NOT(n5)
+out2 = XOR(n6, n3)

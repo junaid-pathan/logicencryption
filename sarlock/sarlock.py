@@ -157,8 +157,11 @@ class RandomLogicLocking:
         
         for i, wire in enumerate(selected_wires):
             key_name = f"keyinput{i}"
-            use_xor = random.choice([True, False])
-            gate_type = GateType.XOR if use_xor else GateType.XNOR
+            # Gate polarity must match the key bit for the wire to be
+            # transparent under the correct key: XOR(x, 0) == x, XNOR(x, 1) == x.
+            # (Previously chosen independently of correct_key, which made the
+            # stored "correct" key only ~50% likely to actually be transparent.)
+            gate_type = GateType.XOR if self.correct_key[key_name] == 0 else GateType.XNOR
             new_wire = f"{wire}_locked"
             
             for gate in self.locked_circuit.gates:
@@ -226,7 +229,10 @@ class StrongLogicLocking:
         
         for i, wire in enumerate(selected_wires[:self.num_key_bits]):
             key_name = f"keyinput{i}"
-            gate_type = GateType.XOR if i % 2 == 0 else GateType.XNOR
+            # Gate polarity must match the key bit, same reasoning as
+            # RandomLogicLocking above -- alternating by index ignored the
+            # actual key value and broke correct-key transparency.
+            gate_type = GateType.XOR if self.correct_key[key_name] == 0 else GateType.XNOR
             new_wire = f"{wire}_sll_{i}"
             
             for gate in self.locked_circuit.gates:
@@ -252,6 +258,7 @@ class SARLock:
         self.num_key_bits = num_key_bits
         self.locked_circuit: Optional[Circuit] = None
         self.correct_key: Optional[Dict[str, int]] = None
+        self.protected_pattern: Optional[List[int]] = None
         self.flip_output: Optional[str] = None
 
     # Builds a comparator that outputs 1 when all input bits match their corresponding key bits; implemented as XNOR gates feeding an AND tree
@@ -293,18 +300,47 @@ class SARLock:
         
         return current_wires[0], gates
 
-    # Inverts the comparator output so the flip signal is 1 on mismatch and 0 on match (suppressing the flip when the correct key is applied)
-    def _build_mask(self, comparator_out: str, gate_prefix: str) -> Tuple[str, List[Gate]]:
+    # Builds a detector that fires (=1) only when input_wires exactly equal
+    # the hardwired pattern bits: pass the wire straight through for a 1-bit,
+    # invert it for a 0-bit, then AND-reduce -- same idea as _build_comparator
+    # but against constant bits instead of another wire.
+    def _build_pattern_detector(self, input_wires: List[str], pattern: List[int],
+                                gate_prefix: str) -> Tuple[str, List[Gate]]:
         gates = []
-        not_wire = f"{gate_prefix}_mask_out"
-        not_gate = Gate(
-            gate_id=f"{gate_prefix}_MASK_NOT",
-            gate_type=GateType.NOT,
-            inputs=[comparator_out],
-            output=not_wire
-        )
-        gates.append(not_gate)
-        return not_wire, gates
+        bit_wires = []
+        for i, (inp, bit) in enumerate(zip(input_wires, pattern)):
+            if bit == 1:
+                bit_wires.append(inp)
+            else:
+                not_wire = f"{gate_prefix}_not_{i}"
+                gates.append(Gate(
+                    gate_id=f"{gate_prefix}_NOT_{i}",
+                    gate_type=GateType.NOT,
+                    inputs=[inp],
+                    output=not_wire
+                ))
+                bit_wires.append(not_wire)
+
+        current_wires = bit_wires
+        counter = 0
+        while len(current_wires) > 1:
+            next_wires = []
+            for i in range(0, len(current_wires), 2):
+                if i + 1 < len(current_wires):
+                    and_wire = f"{gate_prefix}_and_{counter}"
+                    gates.append(Gate(
+                        gate_id=f"{gate_prefix}_AND_{counter}",
+                        gate_type=GateType.AND,
+                        inputs=[current_wires[i], current_wires[i + 1]],
+                        output=and_wire
+                    ))
+                    next_wires.append(and_wire)
+                    counter += 1
+                else:
+                    next_wires.append(current_wires[i])
+            current_wires = next_wires
+
+        return current_wires[0], gates
 
     # Applies SARLock: builds comparator + mask and XORs the flip signal into the target output; forces 2^n - 1 DIPs for a successful SAT attack
     def lock(self, target_output_idx: int = 0, seed: Optional[int] = None,
@@ -328,28 +364,49 @@ class SARLock:
         num_compare_bits = min(self.num_key_bits, len(self.locked_circuit.primary_inputs))
         compare_inputs = self.locked_circuit.primary_inputs[:num_compare_bits]
         compare_keys = key_names[:num_compare_bits]
-        
+
+        # The protected pattern IS the correct key (Xp == K*): this makes
+        # the pattern-detector and key-comparator trigger on the exact same
+        # condition once the correct key is supplied, so they cancel for
+        # every input below -- not just one.
+        self.protected_pattern = [self.correct_key[k] for k in compare_keys]
+
+        pattern_out, pattern_gates = self._build_pattern_detector(
+            compare_inputs, self.protected_pattern, "SARLOCK_PAT"
+        )
+        for gate in pattern_gates:
+            self.locked_circuit.add_gate(gate)
+
         comp_out, comp_gates = self._build_comparator(compare_inputs, compare_keys, "SARLOCK")
         for gate in comp_gates:
             self.locked_circuit.add_gate(gate)
-        
-        mask_out, mask_gates = self._build_mask(comp_out, "SARLOCK")
-        for gate in mask_gates:
-            self.locked_circuit.add_gate(gate)
-        
+
+        # Flip only when the pattern-detector and key-comparator disagree.
+        # Correct key -> both fire on the same inputs -> XOR is always 0 ->
+        # output unchanged for all inputs. Wrong key -> they disagree only
+        # on the (at most 2) inputs equal to Xp or to the wrong key.
+        flip_wire = "SARLOCK_flip"
+        flip_gate = Gate(
+            gate_id="SARLOCK_FLIP_XOR",
+            gate_type=GateType.XOR,
+            inputs=[pattern_out, comp_out],
+            output=flip_wire
+        )
+        self.locked_circuit.add_gate(flip_gate)
+
         # XOR the flip signal into the chosen primary output
         target_output = self.locked_circuit.primary_outputs[target_output_idx]
         new_output = f"{target_output}_sarlock"
         xor_gate = Gate(
             gate_id="SARLOCK_OUTPUT_XOR",
             gate_type=GateType.XOR,
-            inputs=[target_output, mask_out],
+            inputs=[target_output, flip_wire],
             output=new_output
         )
         self.locked_circuit.add_gate(xor_gate)
         self.locked_circuit.primary_outputs[target_output_idx] = new_output
         self.flip_output = new_output
-        
+
         return self.locked_circuit
 
 
