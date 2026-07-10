@@ -1,0 +1,26 @@
+# c17 - ISCAS'85 benchmark
+# 5 inputs, 2 outputs, 6 gates
+
+INPUT(1)
+INPUT(2)
+INPUT(3)
+INPUT(6)
+INPUT(7)
+INPUT(keyinput0)
+INPUT(keyinput1)
+INPUT(keyinput2)
+INPUT(keyinput3)
+
+OUTPUT(22)
+OUTPUT(23)
+
+10 = XNOR(10_EPIC_orig, keyinput1)
+11 = XOR(11_EPIC_orig, keyinput3)
+16 = XOR(16_EPIC_orig, keyinput2)
+19 = XNOR(19_EPIC_orig, keyinput0)
+22 = NAND(10, 16)
+23 = NAND(16, 19)
+19_EPIC_orig = NAND(11, 7)
+10_EPIC_orig = NAND(1, 3)
+16_EPIC_orig = NAND(2, 11)
+11_EPIC_orig = NAND(3, 6)

@@ -1,0 +1,42 @@
+# 4 inputs
+# 1 outputs
+# 3 D-type flipflops
+# 2 inverters
+# 8 gates (1 ANDs + 1 NANDs + 2 ORs + 4 NORs)
+
+INPUT(G0)
+INPUT(G1)
+INPUT(G2)
+INPUT(G3)
+INPUT(keyinput0)
+INPUT(keyinput1)
+INPUT(keyinput2)
+INPUT(keyinput3)
+INPUT(keyinput4)
+INPUT(keyinput5)
+INPUT(keyinput6)
+INPUT(keyinput7)
+
+OUTPUT(G17)
+
+G5 = DFF(G10)
+G6 = DFF(G11)
+G7 = DFF(G13)
+G14 = XNOR(G14_EPIC_orig, keyinput5)
+G17 = NOT(G11)
+G8 = XOR(G8_EPIC_orig, keyinput1)
+G15 = XNOR(G15_EPIC_orig, keyinput3)
+G16 = XNOR(G16_EPIC_orig, keyinput4)
+G9 = XOR(G9_EPIC_orig, keyinput7)
+G10 = XOR(G10_EPIC_orig, keyinput6)
+G11 = NOR(G5, G9)
+G12 = XNOR(G12_EPIC_orig, keyinput2)
+G13 = XOR(G13_EPIC_orig, keyinput0)
+G13_EPIC_orig = NOR(G2, G12)
+G8_EPIC_orig = AND(G14, G6)
+G12_EPIC_orig = NOR(G1, G7)
+G15_EPIC_orig = OR(G12, G8)
+G16_EPIC_orig = OR(G3, G8)
+G14_EPIC_orig = NOT(G0)
+G10_EPIC_orig = NOR(G14, G11)
+G9_EPIC_orig = NAND(G16, G15)
