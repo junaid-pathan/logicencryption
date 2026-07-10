@@ -203,3 +203,125 @@ class BenchmarkParser:
                 inputs_str = ', '.join(gate.inputs)
                 gate_type_str = gate_type_str_map[gate.gate_type]
                 f.write(f"{gate.output} = {gate_type_str}({inputs_str})\n")
+
+
+class AntiSAT:
+    """Baseline Anti-SAT block (Xie & Srivastava, CHES 2016, Fig. 3(a)/4(a)).
+
+    Two blocks share the same n input wires X, each XOR'd with its own
+    n-bit key (Kl1, Kl2) before feeding an AND-tree (g) and a NAND-tree
+    (g-bar). Y = g(X^Kl1) AND g-bar(X^Kl2) is XOR'd into a primary output.
+
+    Correct-key condition: Kl1_i == Kl2_i for every bit i (paper section
+    4.1) -- then both trees see identical inputs, so g == NOT(g-bar)
+    always, Y is a constant 0, and the XOR into the output is a no-op for
+    every input. Any wrong key makes Y = 1 for at least the one input
+    pattern that makes g(X^Kl1) fire (g is an AND-tree, so p=1: it fires
+    on exactly one pattern), corrupting the output there.
+    """
+
+    def __init__(self, circuit: Circuit, block_input_size: int):
+        self.original_circuit = circuit
+        self.n = block_input_size
+        self.locked_circuit: Optional[Circuit] = None
+        self.correct_key: Optional[Dict[str, int]] = None
+        self.block_inputs: List[str] = []
+        self.target_output: Optional[str] = None
+
+    # Reduces a list of wires with a balanced AND tree; returns the output wire
+    def _and_tree(self, wires: List[str], gate_prefix: str) -> Tuple[str, List[Gate]]:
+        gates = []
+        if len(wires) == 1:
+            return wires[0], gates
+        level = wires[:]
+        stage = 0
+        while len(level) > 1:
+            next_level = []
+            for i in range(0, len(level) - 1, 2):
+                and_wire = f"{gate_prefix}_and_s{stage}_{i // 2}"
+                gates.append(Gate(
+                    gate_id=f"{gate_prefix}_AND_s{stage}_{i // 2}",
+                    gate_type=GateType.AND,
+                    inputs=[level[i], level[i + 1]],
+                    output=and_wire
+                ))
+                next_level.append(and_wire)
+            if len(level) % 2 == 1:
+                next_level.append(level[-1])
+            level = next_level
+            stage += 1
+        return level[0], gates
+
+    def lock(self, seed: Optional[int] = None, target_output_idx: int = 0) -> Circuit:
+        if seed is not None:
+            random.seed(seed)
+
+        self.locked_circuit = self.original_circuit.copy()
+        n = self.n
+
+        if n > len(self.locked_circuit.primary_inputs):
+            raise ValueError(
+                f"block_input_size ({n}) exceeds available primary inputs "
+                f"({len(self.locked_circuit.primary_inputs)})"
+            )
+        self.block_inputs = random.sample(self.locked_circuit.primary_inputs, n)
+
+        kl1_names = [f"keyinput{i}" for i in range(n)]
+        kl2_names = [f"keyinput{n + i}" for i in range(n)]
+        for kw in kl1_names + kl2_names:
+            self.locked_circuit.add_key_input(kw)
+
+        # Kl2 == Kl1 is one of the 2^n valid correct-key combinations (paper
+        # section 4.1): any bit-for-bit-equal pair works, this just picks one.
+        kl1_bits = [random.randint(0, 1) for _ in range(n)]
+        kl2_bits = kl1_bits[:]
+        self.correct_key = {}
+        self.correct_key.update(dict(zip(kl1_names, kl1_bits)))
+        self.correct_key.update(dict(zip(kl2_names, kl2_bits)))
+
+        all_gates: List[Gate] = []
+
+        # z1_i = x_i XOR Kl1_i, feeds g (AND-tree)
+        z1_wires = []
+        for i, pi in enumerate(self.block_inputs):
+            z_wire = f"antisat_z1_{i}"
+            all_gates.append(Gate(f"ANTISAT_Z1_{i}", GateType.XOR, [pi, kl1_names[i]], z_wire))
+            z1_wires.append(z_wire)
+
+        # z2_i = x_i XOR Kl2_i, feeds g-bar (NAND-tree)
+        z2_wires = []
+        for i, pi in enumerate(self.block_inputs):
+            z_wire = f"antisat_z2_{i}"
+            all_gates.append(Gate(f"ANTISAT_Z2_{i}", GateType.XOR, [pi, kl2_names[i]], z_wire))
+            z2_wires.append(z_wire)
+
+        g_out, g_gates = self._and_tree(z1_wires, "antisat_g")
+        all_gates.extend(g_gates)
+
+        gbar_and_out, gbar_gates = self._and_tree(z2_wires, "antisat_gbar")
+        all_gates.extend(gbar_gates)
+        gbar_out = "antisat_gbar_out"
+        all_gates.append(Gate("ANTISAT_GBAR_NOT", GateType.NOT, [gbar_and_out], gbar_out))
+
+        y_wire = "antisat_y"
+        all_gates.append(Gate("ANTISAT_Y_AND", GateType.AND, [g_out, gbar_out], y_wire))
+
+        for gate in all_gates:
+            self.locked_circuit.add_gate(gate)
+
+        # Secure integration (paper section 4.3): XOR Y into a primary
+        # output. A future refinement could pick the wire with the top-30%
+        # observability instead of a primary output directly, per the
+        # paper's "secure integration" experiment -- a primary output is
+        # the simplest choice that guarantees full observability.
+        self.target_output = self.locked_circuit.primary_outputs[target_output_idx]
+        new_output = f"{self.target_output}_antisat"
+        self.locked_circuit.add_gate(Gate(
+            gate_id="ANTISAT_OUTPUT_XOR",
+            gate_type=GateType.XOR,
+            inputs=[self.target_output, y_wire],
+            output=new_output
+        ))
+        self.locked_circuit.primary_outputs[target_output_idx] = new_output
+
+        return self.locked_circuit
