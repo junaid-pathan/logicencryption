@@ -199,3 +199,67 @@ class BenchmarkParser:
                 inputs_str = ', '.join(gate.inputs)
                 gate_type_str = gate_type_str_map[gate.gate_type]
                 f.write(f"{gate.output} = {gate_type_str}({inputs_str})\n")
+
+
+class Unroller:
+    """Converts a sequential (DFF-containing) circuit into an equivalent
+    purely combinational circuit spanning `cycles` clock cycles.
+
+    Each DFF's Q output at cycle t is replaced by a direct wire connection
+    to its D input's value computed at cycle t-1 -- one fresh renamed copy
+    of the combinational logic is emitted per cycle instead of looping
+    through time. Cycle 0's state (each DFF's Q value before any clock
+    edge) has no prior cycle to come from, so it is exposed as a free
+    primary input (e.g. "G5_c0") -- callers can drive it to 0 to simulate
+    a reset, or to any value for bounded/attacker-style analysis.
+    """
+
+    def __init__(self, circuit: Circuit):
+        self.original = circuit
+        self.comb_gates = [g for g in circuit.gates if g.gate_type != GateType.DFF]
+        self.dff_gates = {g.output: g for g in circuit.gates if g.gate_type == GateType.DFF}
+        # D-side source wire for each DFF's Q output
+        self.d_source = {q: g.inputs[0] for q, g in self.dff_gates.items()}
+
+    def unroll(self, cycles: int) -> Circuit:
+        if cycles < 1:
+            raise ValueError("cycles must be >= 1")
+
+        unrolled = Circuit()
+        rename_cache: Dict[tuple, str] = {}
+
+        def rename(wire: str, t: int) -> str:
+            if wire in CONSTANT_WIRES:
+                return wire
+            key = (wire, t)
+            if key in rename_cache:
+                return rename_cache[key]
+
+            if wire in self.dff_gates:
+                if t == 0:
+                    result = f"{wire}_c0"
+                    unrolled.add_primary_input(result)
+                else:
+                    result = rename(self.d_source[wire], t - 1)
+            else:
+                result = f"{wire}_c{t}"
+
+            rename_cache[key] = result
+            return result
+
+        for t in range(cycles):
+            for pi in self.original.primary_inputs:
+                unrolled.add_primary_input(rename(pi, t))
+
+            for gate in self.comb_gates:
+                unrolled.add_gate(Gate(
+                    gate_id=f"{gate.gate_id}_c{t}",
+                    gate_type=gate.gate_type,
+                    inputs=[rename(inp, t) for inp in gate.inputs],
+                    output=rename(gate.output, t),
+                ))
+
+            for po in self.original.primary_outputs:
+                unrolled.add_primary_output(rename(po, t))
+
+        return unrolled
