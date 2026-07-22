@@ -1,0 +1,8 @@
+INPUT(a)
+INPUT(b)
+INPUT(c)
+INPUT(d)
+OUTPUT(out1)
+n1 = AND(a, b)
+n2 = OR(c, d)
+out1 = XOR(n1, n2)
