@@ -263,3 +263,36 @@ class Unroller:
                 unrolled.add_primary_output(rename(po, t))
 
         return unrolled
+
+
+def main():
+    import argparse
+
+    ap = argparse.ArgumentParser(
+        description="Unroll a sequential (DFF-containing) .bench circuit "
+                    "into an equivalent combinational circuit over N cycles."
+    )
+    ap.add_argument('input', help='Input .bench file (may contain DFF gates)')
+    ap.add_argument('output', help='Output unrolled .bench file (purely combinational)')
+    ap.add_argument('--cycles', '-c', type=int, default=2,
+                    help='Number of clock cycles to unroll (default: 2)')
+    args = ap.parse_args()
+
+    print(f"[Unroll] Parsing: {args.input}")
+    circuit = BenchmarkParser.parse_bench(args.input)
+    num_dffs = sum(1 for g in circuit.gates if g.gate_type == GateType.DFF)
+    print(f"  {len(circuit.primary_inputs)} inputs, {len(circuit.gates)} gates "
+          f"({num_dffs} DFFs), {len(circuit.primary_outputs)} outputs")
+
+    unroller = Unroller(circuit)
+    unrolled = unroller.unroll(cycles=args.cycles)
+    print(f"[Unroll] Unrolled over {args.cycles} cycles -> "
+          f"{len(unrolled.primary_inputs)} inputs, {len(unrolled.gates)} gates, "
+          f"{len(unrolled.primary_outputs)} outputs (purely combinational)")
+
+    BenchmarkParser.write_bench(unrolled, args.output)
+    print(f"[Unroll] Written to: {args.output}")
+
+
+if __name__ == '__main__':
+    main()
